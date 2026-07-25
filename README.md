@@ -11,7 +11,6 @@ Published CVEs in widely-used software, with a focus on **incomplete-fix analysi
 | CVE-2026-55667 | File Browser | HIGH (CVSS 8.2) | Symlink / path traversal (incomplete-fix) | [read](writeups/CVE-2026-55667-filebrowser.md) |
 | CVE-2026-63131 | OpenBao | MODERATE (CVSS 6.0) | Access-control bypass (cross-fork) | [read](writeups/CVE-2026-63131-openbao.md) |
 | CVE-2026-27761 | Gitea | Credited | Self-hosted Git service | [read](writeups/CVE-2026-27761-gitea.md) |
-| GHSA-3frw-wjxx-2p6m | IBM mcp-context-forge (MCP Gateway) | In coordination | SSRF + credential forwarding (MCP) | details after remediation |
 
 ## Tools
 
