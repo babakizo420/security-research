@@ -1,0 +1,15 @@
+Synthetic fix diff modeling how the download-path token-scope guard was added.
+`incfix.py diff` reads it and names the guard so you can hunt the siblings.
+
+diff --git a/routers/web/repo/download.go b/routers/web/repo/download.go
+--- a/routers/web/repo/download.go
++++ b/routers/web/repo/download.go
+@@ -18,6 +18,10 @@ package repo
+ // GET /{owner}/{repo}/raw/branch/{branch}/{path}   [middleware: AllowBasic]
+ func SingleDownload(ctx *Context) {
++	if !checkDownloadTokenScope(ctx) {
++		ctx.Error(403)
++		return
++	}
+ 	serveRepoContent(ctx, ctx.Repo.Commit)
+ }
