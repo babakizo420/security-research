@@ -63,6 +63,33 @@ Live mode sends only benign GET/OPTIONS requests. It checks whether the transpor
 answers without auth, whether it reflects a foreign `Origin`, and it notes the
 Host-validation question. It is a smoke test, not a scanner.
 
+### class-scan (repo-level verdict for the Dynatrace unauth-transport variant)
+
+`class-scan` rolls the per-line `OPEN-TRANSPORT` and `NO-ORIGIN-CHECK` signals up
+into one verdict for a specific, high-impact shape: an HTTP or SSE MCP transport
+that has **neither** auth gating the transport **nor** DNS-rebinding / Origin
+protection. That is the class of Dynatrace's MCP server before v2.0.0
+([GHSA-p7w7-4929-vpj5](https://github.com/advisories/GHSA-p7w7-4929-vpj5)): in
+`--http` mode it handed the raw request body to a per-request transport with no
+auth and no Host/Origin allowlist, so anyone who could reach the port (or, by
+DNS-rebinding, any web page even against a localhost bind) could fire
+`tools/call` under the server's own credentials.
+
+```
+python3 mcp_audit.py class-scan --repo /path/to/your/mcp-server
+python3 mcp_audit.py class-scan --repo /path/to/your/mcp-server --format json
+```
+
+Verdicts: **VULNERABLE-CANDIDATE** (http transport, no auth, no DNS-rebinding),
+**REVIEW** (http transport with an auth signal but no DNS-rebinding: confirm the
+auth actually runs before the body reaches the transport), **LIKELY-PROTECTED**
+(a DNS-rebinding/Origin allowlist is present), or **N/A** (stdio-only). Auth and
+DNS-rebinding signals are read from code, not comments, so a keyword in a
+docstring does not mask a real gap. The `examples/http_transport_noauth.py` and
+`examples/http_transport_protected.py` fixtures are the positive and negative
+cases. A VULNERABLE-CANDIDATE is a lead: read the HTTP handler by hand and
+enumerate what the exposed tools can do before calling it a finding.
+
 ## Worked example
 
 The repo ships an intentionally-insecure fixture,

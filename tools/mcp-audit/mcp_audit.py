@@ -357,6 +357,130 @@ def cmd_live(args):
     return 0
 
 
+# ---------------------------------------------------------------------------
+# class-scan: the Dynatrace GHSA-p7w7-4929-vpj5 variant (repo-level roll-up).
+# An HTTP/SSE MCP transport that has NEITHER auth gating the transport NOR
+# DNS-rebinding/Origin protection = unauthenticated tool invocation under the
+# server's own credentials for anyone who can reach the port (or, via
+# DNS-rebinding, any web page even against a localhost-bound server). This
+# complements the per-line OPEN-TRANSPORT / NO-ORIGIN-CHECK static findings with
+# a single VULNERABLE-CANDIDATE / REVIEW / LIKELY-PROTECTED verdict per repo.
+# ---------------------------------------------------------------------------
+import re as _re_cs
+
+_CS_HTTP_TRANSPORT = _re_cs.compile(
+    r"StreamableHTTPServerTransport|SSEServerTransport|new\s+SseServerTransport|"
+    r"streamable_http|sse_server|transport\s*=\s*[\"'](sse|streamable-http|http)[\"']",
+    _re_cs.I)
+_CS_HTTP_LISTEN = _re_cs.compile(
+    r"\.listen\(|http\.createServer|createServer\(|app\.(post|all)\(|express\(\)|"
+    r"Fastify\(|new\s+Hono|uvicorn\.run|\.run\(host|host\s*=\s*[\"']0\.0\.0\.0")
+_CS_DNS_PROT = _re_cs.compile(
+    r"enableDnsRebindingProtection\s*:\s*true|allowedHosts|allowedOrigins|"
+    r"allowed_hosts|allowed_origins|check.?origin|validateOrigin|verify.?origin",
+    _re_cs.I)
+_CS_AUTH = _re_cs.compile(
+    r"authorization|bearer|api[_-]?key|x-api-key|apiKey|authenticate|verifyToken|"
+    r"validateToken|requireAuth|MCP_BEARER|timingSafeEqual|jwt|oauth|"
+    r"session[_-]?token|WWW-Authenticate|\b401\b", _re_cs.I)
+_CS_HTTP_FLAG = _re_cs.compile(r"--http|--sse|--transport|[\"'](http|sse)[\"']", _re_cs.I)
+_CS_EXTS = (".ts", ".js", ".mjs", ".cjs", ".py", ".tsx", ".go", ".rb")
+_CS_SKIP = ("/node_modules/", "/.git/", "/dist/", "/build/", "/test",
+            "/__tests__", "/examples")
+_CS_BLOCK_COMMENT = _re_cs.compile(r"/\*.*?\*/|'''.*?'''|\"\"\".*?\"\"\"", _re_cs.S)
+
+
+def _cs_strip_comments(code):
+    """Drop comments and docstrings so an auth/dns keyword sitting in prose does
+    not read as a real code signal (the verdict must reflect CODE, not text)."""
+    code = _CS_BLOCK_COMMENT.sub(" ", code)
+    out = []
+    for ln in code.splitlines():
+        s = ln.lstrip()
+        if s.startswith(("#", "//", "*", "///")):
+            continue
+        out.append(ln.split("#", 1)[0].split("//", 1)[0])
+    return "\n".join(out)
+
+
+def cmd_classscan(args):
+    root = args.repo
+    if not os.path.isdir(root):
+        die("repo path is not a directory: " + root)
+    http_t, dns_p, auth_f = [], [], []
+    listen = flag = False
+    for dp, _dn, fn in os.walk(root):
+        if any(s in dp for s in _CS_SKIP):
+            continue
+        for f in fn:
+            if not f.endswith(_CS_EXTS):
+                continue
+            path = os.path.join(dp, f)
+            try:
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    c = fh.read()
+            except OSError:
+                continue
+            rel = os.path.relpath(path, root)
+            code = _cs_strip_comments(c)
+            if _CS_HTTP_TRANSPORT.search(code):
+                http_t.append(rel)
+            if _CS_HTTP_LISTEN.search(code):
+                listen = True
+            if _CS_DNS_PROT.search(code):
+                dns_p.append(rel)
+            if _CS_AUTH.search(code):
+                auth_f.append(rel)
+            if _CS_HTTP_FLAG.search(code):
+                flag = True
+    has_http = bool(http_t) or (listen and flag)
+    if not has_http:
+        verdict = "N/A"
+        note = "no HTTP/SSE MCP transport detected (stdio-only, or not an MCP server)"
+    elif not dns_p and not auth_f:
+        verdict = "VULNERABLE-CANDIDATE"
+        note = ("HTTP transport with NO auth signal and NO DNS-rebinding/Origin "
+                "protection. Anyone who can reach the port (or any web page via "
+                "DNS-rebinding, even against a localhost-bound server) can invoke "
+                "tools/call under the server's own credentials. Read the HTTP "
+                "handler by hand to confirm before calling this a finding.")
+    elif not dns_p and auth_f:
+        verdict = "REVIEW"
+        note = ("HTTP transport with an auth signal but no DNS-rebinding/Origin "
+                "check. Confirm the auth actually gates the transport (runs BEFORE "
+                "the body reaches the MCP transport), not an unrelated outbound use.")
+    else:
+        verdict = "LIKELY-PROTECTED"
+        note = "HTTP transport with a DNS-rebinding/Origin protection signal present."
+    out = {
+        "verdict": verdict,
+        "reference": ("Dynatrace MCP GHSA-p7w7-4929-vpj5 "
+                      "(unauthenticated HTTP-transport tool invocation)"),
+        "note": note,
+        "http_transport_files": http_t[:5],
+        "auth_signal_files": auth_f[:5],
+        "dns_rebind_files": dns_p[:5],
+        "remediation": ("Gate the transport with auth (bearer/session/OAuth checked "
+                        "BEFORE the body reaches the MCP transport) AND set "
+                        "enableDnsRebindingProtection: true with allowedHosts / "
+                        "allowedOrigins allowlists."),
+    }
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(out, indent=2))
+        return 0
+    print("# mcp-audit class-scan (Dynatrace GHSA-p7w7-4929-vpj5 variant)")
+    print("VERDICT: " + verdict)
+    print(note)
+    if http_t:
+        print("  http transport: " + ", ".join(http_t[:5]))
+    if auth_f:
+        print("  auth signal in: " + ", ".join(auth_f[:5]))
+    if dns_p:
+        print("  dns-rebind signal in: " + ", ".join(dns_p[:5]))
+    print("  remediation: " + out["remediation"])
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="mcp_audit.py",
@@ -377,6 +501,13 @@ def build_parser():
                     help="required to target a non-localhost endpoint you own")
     pl.add_argument("--timeout", type=float, default=5.0)
     pl.set_defaults(func=cmd_live)
+
+    pc = sub.add_parser("class-scan",
+                        help="repo-level verdict for the Dynatrace "
+                             "GHSA-p7w7-4929-vpj5 unauth-HTTP-transport variant")
+    pc.add_argument("--repo", required=True, help="path to the MCP server source tree")
+    pc.add_argument("--format", choices=["text", "json"], default="text")
+    pc.set_defaults(func=cmd_classscan)
 
     return p
 
