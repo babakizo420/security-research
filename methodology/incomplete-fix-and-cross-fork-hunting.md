@@ -41,3 +41,11 @@ To run this continuously rather than by hand, I built an autonomous multi-agent 
 - Prove it on the **released** version, never a development branch.
 - Read the code to the metal; do not overclaim from a description.
 - Separate confirmed from unconfirmed, and disclose responsibly.
+
+## Reproduction fidelity (added from a cross-fork port-lag case study)
+A cross-fork port-lag is confirmed at the SOURCE level when the fork carries the exact pre-fix code and the
+upstream shipped a fix the fork has not ported. That is a strong LEAD. It becomes a confirmed EXPLOIT only when
+reproduced against the target's real execution lifecycle: identical clone/repo mode, the same number of
+operations per request, the same commit/teardown boundaries, and the same runtime (git version, core.hooksPath,
+temp-filesystem exec flags). A local "primitive" that fires through a sequence the target never performs is a
+false-confirm; downgrade to "source-lead, empirically unverified" until it reproduces on the target itself.
